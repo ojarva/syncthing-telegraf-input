@@ -128,19 +128,20 @@ func handleSystemConnections(apiKey string, wg *sync.WaitGroup) error {
 	return nil
 }
 
-func handleFolderStats(apiKey string, folderConfig FolderConfig, wg *sync.WaitGroup) error {
+func handleFolderStats(apiKey string, folderConfig FolderConfig, wg *sync.WaitGroup) {
 	defer wg.Done()
 	resp, err := makeRequest(apiKey, fmt.Sprintf("rest/db/status?folder=%s", folderConfig.ID))
 	if err != nil {
-		return err
+		os.Stderr.Write([]byte(fmt.Sprintf("Unable to read status for %s: %s", folderConfig.ID, err)))
+		return
 	}
 	var stats FolderStats
 	err = json.NewDecoder(resp.Body).Decode(&stats)
 	if err != nil {
-		return fmt.Errorf("invalid response body: %s", err)
+		os.Stderr.Write([]byte(fmt.Sprintf("invalid response body: %s", err)))
+		return
 	}
 	fmt.Printf("syncthing_folder,folder_id=%s type=%s,rescanInterval=%d,errors=%d,global_bytes=%d,global_deleted=%d,global_directories=%d,global_files=%d,global_symlinks=%d,global_total_items=%d,insync_bytes=%d,insync_files=%d,local_bytes=%d,local_deleted=%d,local_directories=%d,local_files=%d,local_symlinks=%d,local_total_items=%d,need_bytes=%d,need_deletes=%d,need_directories=%d,need_files=%d,need_symlinks=%d,need_total_items=%d,pull_errors=%d\n", folderConfig.ID, folderConfig.Type, folderConfig.RescanIntervalS, stats.Errors, stats.GlobalBytes, stats.GlobalDeleted, stats.GlobalDirectories, stats.GlobalFiles, stats.GlobalSymlinks, stats.GlobalTotalItems, stats.InSyncBytes, stats.InSyncFiles, stats.LocalBytes, stats.LocalDeleted, stats.LocalDirectories, stats.LocalFiles, stats.LocalSymlinks, stats.LocalTotalItems, stats.NeedBytes, stats.NeedDeletes, stats.NeedDirectories, stats.NeedFiles, stats.NeedSymlinks, stats.NeedTotalItems, stats.PullErrors)
-	return nil
 }
 
 func handleFolders(apiKey string, wg *sync.WaitGroup) error {
@@ -176,6 +177,13 @@ func handleReport(apiKey string, wg *sync.WaitGroup) error {
 	return nil
 }
 
+func wrapHandler(handler func(string, *sync.WaitGroup) error, apiKey string, wg *sync.WaitGroup) {
+	err := handler(apiKey, wg)
+	if err != nil {
+		os.Stderr.Write([]byte(fmt.Sprintf("Failed: %s", err)))
+	}
+}
+
 func main() {
 
 	flag.Parse()
@@ -191,7 +199,7 @@ func main() {
 	}
 	for _, handler := range allHandlers {
 		wg.Add(1)
-		go handler(*apiKeyFlag, &wg)
+		go wrapHandler(handler, *apiKeyFlag, &wg)
 	}
 	wg.Wait()
 }
