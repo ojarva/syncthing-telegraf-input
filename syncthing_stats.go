@@ -70,6 +70,13 @@ type Connections struct {
 	Connections map[string]ConnectionStatItem `json:"connections"`
 }
 
+type DeviceStatItem struct {
+	LastSeen                time.Time `json:"lastSeen"`
+	LastConnectionDurationS float64   `json:"lastConnectionDurationS"`
+}
+
+type Devices map[string]DeviceStatItem
+
 var server = flag.String("server", "http://localhost:8384", "Syncthing API URL")
 var apiKeyFlag = flag.String("apikey", "", "Syncthing API key")
 var useFullReportFlag = flag.Bool("use-full-report", false, "Add extra stats from svc/report. Somewhat slow/heavy.")
@@ -124,6 +131,31 @@ func handleSystemConnections(apiKey string, wg *sync.WaitGroup) error {
 				connected = 1
 			}
 			fmt.Printf("syncthing_connection,client_id=%s connected=%d,paused=%d,in_bytes=%d,out_bytes=%d,type=%s\n", connectionId, connected, paused, connectionStat.InBytesTotal, connectionStat.OutBytesTotal, connectionStat.Type)
+		}
+	}
+	return nil
+}
+
+func handleDevices(apiKey string, wg *sync.WaitGroup) error {
+	defer wg.Done()
+	var cutOffTime = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	resp, err := makeRequest(apiKey, "rest/stats/device")
+	if err != nil {
+		return err
+	}
+
+	var stats Devices
+	err = json.NewDecoder(resp.Body).Decode(&stats)
+	if err != nil {
+		return fmt.Errorf("invalid response body: %s", err)
+	}
+	numberOfDevices := len(stats)
+	fmt.Printf("syncthing_device_totals number_of_devices=%d\n", numberOfDevices)
+
+	for deviceId, deviceStat := range stats {
+		if cutOffTime.Before(deviceStat.LastSeen) {
+			fmt.Printf("syncthing_device,device_id=%s last_seen=%f,last_connection_duration=%f\n",
+				deviceId, deviceStat.LastSeen.Sub(cutOffTime).Seconds(), deviceStat.LastConnectionDurationS)
 		}
 	}
 	return nil
@@ -194,7 +226,7 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	allHandlers := []func(string, *sync.WaitGroup) error{handleFolders, handleSystemConnections}
+	allHandlers := []func(string, *sync.WaitGroup) error{handleFolders, handleSystemConnections, handleDevices}
 	if *useFullReportFlag {
 		allHandlers = append(allHandlers, handleReport)
 	}
