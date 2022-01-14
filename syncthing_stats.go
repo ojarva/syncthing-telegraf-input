@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
 
 type FolderConfig struct {
 	ID              string `json:"id"`
+	Label           string `json:"label"`
 	RescanIntervalS int    `json:"rescanIntervalS"`
 	Type            string `json:"type"`
 }
@@ -68,6 +70,11 @@ type ConnectionStatItem struct {
 type Connections struct {
 	Total       ConnectionStatItem            `json:"total"`
 	Connections map[string]ConnectionStatItem `json:"connections"`
+}
+
+type DeviceConfig struct {
+	DeviceID        string `json:"deviceID"`
+	Name            string `json:"name"`
 }
 
 type DeviceStatItem struct {
@@ -138,8 +145,23 @@ func handleSystemConnections(apiKey string, wg *sync.WaitGroup) error {
 
 func handleDevices(apiKey string, wg *sync.WaitGroup) error {
 	defer wg.Done()
+	resp, err := makeRequest(apiKey, "rest/config/devices")
+	if err != nil {
+		return err
+	}
+	var deviceConfigs []DeviceConfig
+	err = json.NewDecoder(resp.Body).Decode(&deviceConfigs)
+	if err != nil {
+		return fmt.Errorf("invalid response body: %s", err)
+	}
+
+	var deviceNames = make(map[string]string);
+	for _, device := range deviceConfigs {
+		deviceNames[device.DeviceID] = device.Name;
+	}
+
 	var cutOffTime = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
-	resp, err := makeRequest(apiKey, "rest/stats/device")
+	resp, err = makeRequest(apiKey, "rest/stats/device")
 	if err != nil {
 		return err
 	}
@@ -154,8 +176,8 @@ func handleDevices(apiKey string, wg *sync.WaitGroup) error {
 
 	for deviceId, deviceStat := range stats {
 		if cutOffTime.Before(deviceStat.LastSeen) {
-			fmt.Printf("syncthing_device,device_id=%s last_seen=%f,last_connection_duration=%f\n",
-				deviceId, deviceStat.LastSeen.Sub(cutOffTime).Seconds(), deviceStat.LastConnectionDurationS)
+			fmt.Printf("syncthing_device,device_id=%s,device_name=%s last_seen=%f,last_connection_duration=%f\n",
+				deviceId, strings.Replace(deviceNames[deviceId], " ", "\\ ", -1), deviceStat.LastSeen.Sub(cutOffTime).Seconds(), deviceStat.LastConnectionDurationS)
 		}
 	}
 	return nil
@@ -174,7 +196,7 @@ func handleFolderStats(apiKey string, folderConfig FolderConfig, wg *sync.WaitGr
 		os.Stderr.Write([]byte(fmt.Sprintf("invalid response body: %s", err)))
 		return
 	}
-	fmt.Printf("syncthing_folder,folder_id=%s rescanInterval=%d,errors=%d,global_bytes=%d,global_deleted=%d,global_directories=%d,global_files=%d,global_symlinks=%d,global_total_items=%d,insync_bytes=%d,insync_files=%d,local_bytes=%d,local_deleted=%d,local_directories=%d,local_files=%d,local_symlinks=%d,local_total_items=%d,need_bytes=%d,need_deletes=%d,need_directories=%d,need_files=%d,need_symlinks=%d,need_total_items=%d,pull_errors=%d\n", folderConfig.ID, folderConfig.RescanIntervalS, stats.Errors, stats.GlobalBytes, stats.GlobalDeleted, stats.GlobalDirectories, stats.GlobalFiles, stats.GlobalSymlinks, stats.GlobalTotalItems, stats.InSyncBytes, stats.InSyncFiles, stats.LocalBytes, stats.LocalDeleted, stats.LocalDirectories, stats.LocalFiles, stats.LocalSymlinks, stats.LocalTotalItems, stats.NeedBytes, stats.NeedDeletes, stats.NeedDirectories, stats.NeedFiles, stats.NeedSymlinks, stats.NeedTotalItems, stats.PullErrors)
+	fmt.Printf("syncthing_folder,folder_id=%s,folder_label=%s rescanInterval=%d,errors=%d,global_bytes=%d,global_deleted=%d,global_directories=%d,global_files=%d,global_symlinks=%d,global_total_items=%d,insync_bytes=%d,insync_files=%d,local_bytes=%d,local_deleted=%d,local_directories=%d,local_files=%d,local_symlinks=%d,local_total_items=%d,need_bytes=%d,need_deletes=%d,need_directories=%d,need_files=%d,need_symlinks=%d,need_total_items=%d,pull_errors=%d\n", folderConfig.ID, strings.Replace(folderConfig.Label, " ", "\\ ", -1), folderConfig.RescanIntervalS, stats.Errors, stats.GlobalBytes, stats.GlobalDeleted, stats.GlobalDirectories, stats.GlobalFiles, stats.GlobalSymlinks, stats.GlobalTotalItems, stats.InSyncBytes, stats.InSyncFiles, stats.LocalBytes, stats.LocalDeleted, stats.LocalDirectories, stats.LocalFiles, stats.LocalSymlinks, stats.LocalTotalItems, stats.NeedBytes, stats.NeedDeletes, stats.NeedDirectories, stats.NeedFiles, stats.NeedSymlinks, stats.NeedTotalItems, stats.PullErrors)
 }
 
 func handleFolders(apiKey string, wg *sync.WaitGroup) error {
